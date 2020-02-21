@@ -1,0 +1,744 @@
+---
+title: "projet Machine Learning 2 - Weather segmentation"
+author: "Yamina BOUBEKEUR & Amina GHOUL"
+date: "12/12/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+```
+
+# Introduction 
+
+L'objectif de ce projet est de réaliser une segmentation du territoire français basée sur les séries temporelles de _température_ et de _vent_ recueillies à $n = 259$ points de grille en utilisant plusieurs méthodes de clustering.
+
+L'ensemble de données _«weatherdata.Rdata»_ fournit l'évolution temporelle de la température et du vent pour la grille $n = 259$ pour chaque heure pour une année donnée. Le nombre d'heure ici est de $8760$. 
+
+   - **Temp**: désigne la série temporelle de la Température
+   - **Win**: représente la série temporelle du vent
+   - **GPSpos**: contient les positions GPS (longitude et latitude) des points de la grille
+
+# I) Préliminaire
+
+```{r,echo=F}
+rm(list=ls());
+load("weatherdata.Rdata");
+```
+
+Par exemple, la ville de Paris est située à une latitude de $48,51$ et une longitude de $2,20$ et correspond au point $i = 59$ dans la base de données. 
+
+On trace les séries temporelles de _température_ et du _vent_ pour la ville de Paris.
+
+
+```{r,echo=F,width=16, fig.height=2.5}
+CityLat=48.51; CityLong=2.20;
+tabpos=(GPSpos$Lon-CityLong)^2+(GPSpos$Lat-CityLat)^2;
+i=which.min(tabpos);
+par(mfrow=c(1,2))
+plot(Temp[i,],type='l',lwd=2,xlab='time',ylab='Temp',col="blue");
+wind_paris = data.frame(Wind[i,])
+plot(Wind[i,],type='l',lwd=2,xlab='time',ylab='Wind',col="blue");
+```
+
+On ajoute les positions GPS de chaque ville, les tableaux de données _Wind_ et _Temp_.
+```{r,echo=F,results='hide'}
+GPS <- data.frame(GPSpos)
+Wind <- data.frame(Wind,GPS)
+Temp <- data.frame(Temp,GPS)
+dim(Wind) ; dim(Temp)
+```
+
+Les tableaux de données _Vent_ et _Temp_ ont tous les deux $259$ lignes (qui représentent les $259$ villes) et $8762$ colonnes (qui représentent les valeurs de la temp/vent pour chaque 8760 heures + 2 colonnes représentant la latitude et la longitude de chaque ville).
+
+On a choisi 3 villes:
+
+  - **Paris:** correspond au point $i = 59$ dans le dataset comme nous l'avons mentionné ci-dessus
+  - **Lyon:** est situé à une latitude de $45,75$ et une longitude de $4,85$ et correspond au point $i = 177$ dans le dataset
+  - **Perpignan:** est situé à une latitude de $42,70$ et une longitude de $2,90$ et correspond au point $i = 259$ dans le dataset
+
+On représentera ces 3 villes choisies, sur la carte de France.
+
+# II) Wind clustering : 
+
+## II.1) Données brutes
+
+### II.1.1) Kmeans :
+
+On utilise la méthode de _kmeans_ pour fournir une segmentation en 4 groupes du vent en utilisant la série temporelle brute. Les variables ont les mêmes unités donc on ne normalise pas. Les valeurs sont comprises entre 0 et 30.33
+```{r,echo=F,results='hide'}
+set.seed(7)
+wind = Wind[,1:8760] #les variables ont les mêmes unités donc on ne normalise pas
+min(wind) ; max(wind) # les valeurs sont comprises entre 0 et 30.33
+start_time <- Sys.time()
+wind_kmeans <- kmeans(wind, centers = 4, nstart = 5)
+end_time <- Sys.time()
+time_kmean_raw = end_time-start_time
+```
+
+
+```{r,echo=F}
+Wind$cluster <- as.factor(wind_kmeans$cluster) #On ajoute une colonne "cluster" dans le bloc de données Wind.
+```
+
+
+```{r,echo=F,results='hide'}
+table(wind_kmeans$cluster) #tableau qui représente le nombre de villes par cluster
+```
+Ici, en utilisant le clustering kmeans, il y a: `r wind_kmeans$size[1]` villes dans le groupe 1, `r wind_kmeans$size[2]` villes dans le groupe 2, `r wind_kmeans$size[3]` villes dans le groupe 3, `r wind_kmeans$size[4]` villes dans le groupe 4. On remarque que les clusters sont plutôt homogènes, mis à part le cluster 2 qui contient un peu moins d'individus que les autres clusters.
+  
+### II.1.2) Clustering Hierarchique: 
+
+On utilise le _clustering hiérarchique_ pour fournir une segmentation en 4 groupes du vent en utilisant la série temporelle brute. Étant donné que toutes les valeurs ici sont des valeurs numériques continues, on utilisere la méthode de la distance euclidienne pour le calcul du tableau des distances entre individus.
+```{r,echo=F}
+start_time <- Sys.time()
+wind_d = dist(wind,method = "euclidean")
+end_time <- Sys.time()
+time_cah_d = end_time-start_time
+```
+Ensuite l'algorithme de classification hiérarchique va détecter les 2 groupes les plus proches, puis les agréger pour n’en former qu’un seul. On considère alors différentes stratégies d'agrégation: stratégie **linkage average** qui calcule la distance moyenne entre les clusters avant la fusion, la stratégie **Complete linkage** qui calcule la distance maximale entre les clusters avant la fusion, la stratégie **Single linkage** qui calcule la distance minimale entre les clusters avant la fusion, et la stratégie **wards** qui cherche à minimiser l’inertie intra-classe et à maximiser l’inertie inter-classe afin d’obtenir des classes les plus homogènes possibles
+```{r,echo=F}
+wind_avg<-hclust(wind_d, method="average")
+wind_com<-hclust(wind_d, method="complete")
+wind_sing<-hclust(wind_d, method="single")
+start_time <- Sys.time()
+wind_ward<-hclust(wind_d, method="ward.D2")
+end_time <- Sys.time()
+time_cah_raw = end_time-start_time
+```
+On trace le Dendrogramme pour chaque méthode :
+
+```{r, echo=FALSE}
+par(mfrow=c(2,2))
+plot(wind_avg,labels=F)
+rect.hclust(wind_avg,k=4)
+groupes.avg <-cutree(wind_avg,k=4) 
+
+plot(wind_com,labels=F)
+rect.hclust(wind_com,k=4)
+groupes.com <-cutree(wind_com,k=4) 
+
+plot(wind_sing,labels=F)
+rect.hclust(wind_sing,k=4)
+groupes.sing <-cutree(wind_sing,k=4) 
+
+plot(wind_ward,labels=F)
+rect.hclust(wind_ward,k=4)
+groupes.ward <-cutree(wind_ward,k=4) 
+```
+
+On remarque d'après les graphiques que le clustering n'est pas le même pour chaque méthode. On remarque un gros déséquilibre entre les clusters pour les trois premières méthodes, par exemple pour la méthode single, on remarque un effet de chaine seule la méthode de Ward a présenté 4 clusters de taille à peu près homogènes.
+
+On représente les clusters des différentes stratégies sur la carte de France : 
+
+```{r,echo=FALSE}
+Wind$clusteravg = data.frame(groupes.avg)$groupes.avg
+Wind$clustercom = data.frame(groupes.com)$groupes.com
+Wind$clustersing = data.frame(groupes.sing)$groupes.sing
+Wind$clusterward = data.frame(groupes.ward)$groupes.ward
+```
+
+```{r,echo=FALSE,width=16, fig.height=4.5}
+par(mfrow=c(2,2))
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clusteravg))
+title(main = "Hierarchical clustering Wind - average")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clustercom))
+title(main = "Hierarchical clustering Wind - complete")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clustersing))
+title(main = "Hierarchical clustering Wind - single")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clusterward))
+title(main = "Hierarchical clustering Wind - ward")
+```
+
+On remarque la même chose qu'avec les dendogrammes, dans la méthode Ward les 4 clusters sont répartis de manière plus équilibrée comparant aux autres méthodes.
+
+La fonction _agnes{cluster}_ peut également être utilisée pour calculer le dendrogramme. Nous pouvons obtenir le coefficient d'agglomération, qui mesure la quantité de structure de clustering trouvé (des valeurs plus proches de 1 suggèrent une structure de clustering forte).
+D'après l'aide de R, on sait que pour chaque observation $i$, notons $m (i)$ sa dissimilarité avec le premier cluster avec lequel elle est fusionnée, divisée par la dissimilarité de la fusion à l'étape finale de l'algorithme. Le paramètre $ac$ est la moyenne de tous les $1 - m (i)$.
+```{r,echo=F,width=16, fig.height=4}
+library(cluster)
+m <- c( "average", "single", "complete", "ward")
+ac <- c(agnes(wind, method = "average")$ac,agnes(wind, method = "single")$ac,agnes(wind, method = "complete")$ac,agnes(wind, method = "ward")$ac)
+print(rbind(m,ac))
+```
+Cela nous affirme que la méthode de Ward identifie la structure de regroupement la plus solide des quatres méthodes évaluées.
+
+### II.1.3) CAH VS Kmeans :
+
+- Comparaison des temps d'exécution de deux méthodes de clustering 
+
+```{r, echo=FALSE, results='hide'}
+time_kmean_raw
+time_cah = time_cah_d + time_cah_raw
+time_cah
+```
+
+Pour l'algorithme kmeans, la différence de temps est de `r time_kmean_raw`  alors que pour le clustering hiérarchique elle est de `r time_cah`. On remarque que le temps d'exécution de la CAH plus grand que celui des Kmeans. K-means est donc moins coûteux en termes de calcul que le clustering hiérarchique et peut être exécuté sur de grands ensembles de données dans un délai raisonnable.
+
+```{r,echo=FALSE, fig.height=3.5}
+par(mfrow=c(1,2))
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clusterward))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "CAH Wind - ward")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$cluster))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "Kmeans Wind")
+```
+
+Le territoire français est segmenté presque de la même façon pour les deux méthodes. étant donné que l'algorithme Kmeans est plus rapide que l'algorithme CAH, il est préférable d'utiliser l'algorithme Kmeans.
+
+## II.2) Feature extracion 
+
+### ACP 
+
+Nous utilisons une Analyse en Composantes Principales (ACP) pour réduire la dimension de la série temporelle pour les données du vent. Et avoir une grande variabilité, c'est avoir un sous-espace qui résume au mieux les données. On centre les données, par contre, on n'a pas besoin de normaliser car les variables ont les mêmes unités.
+
+```{r,echo=F}
+wind_pca = prcomp(Wind[,1:8760], center = T) #centrage  des données
+```
+
+On représente la proportion de la variance expliquée pour un certain nombre de composante.
+
+```{r,echo=FALSE,width=16, fig.height=4}
+std_dev <- wind_pca$sdev
+pr_var <- std_dev^2
+#proportion de la variance expliquée
+prop_varex <- pr_var/sum(pr_var)
+par(mfrow=c(2,2))
+#scree plot
+plot(prop_varex, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",xlim=c(0,20),
+          type = "b")
+
+#cumulative scree plot
+plot(cumsum(prop_varex), xlab = "Principal Component",
+              ylab = "Cumulative Proportion of Variance Explained", xlim=c(0,20),
+              type = "b")
+```
+
+
+Ainsi, on peut voir que les 10 premières composantes expliquent plus de 80% de la variance cumulée, donc on peut choisir de conserver 10 composantes principales.
+On remarque également que à partir de 10 composantes principales, la variance cumuléen'augmente pas significativement.
+
+## II.3) Clustering :
+
+On fait une segmentation en 4 clusters du vent en France, basée sur la représentation de l'ACP en ne gardant que 10 composantes principales à l'aide de Kmeans et du clustering hiérarchique comme on a fait précedemment.
+
+```{r,echo=F}
+wind10 = wind_pca$x[,1:10]  #on garde 10 composantes principales
+```
+
+### II.3.1) Kmeans : 
+
+Dans cette partie, on applique l'algorithme de Kmeans comme précedemment et on affiche les résultats dans la partie comparaison.
+
+```{r,echo=F}
+set.seed(7)
+start_time <- Sys.time()
+wind_kmeans10=kmeans(wind10,4,nstart = 5)
+end_time <- Sys.time()
+time_kmean10 = end_time-start_time
+```
+
+```{r,echo=F}
+Wind$cluster10 = wind_kmeans10$cluster  
+```
+
+### II.3.2) CAH:
+
+On applique le clustering hiérarchique (méthode Ward) sur 10 composantes principales.
+
+```{r, echo=F}
+start_time <- Sys.time()
+wind_d10 = dist(wind10, method = "euclidean")
+wind_cah10<-hclust(wind_d10, method="ward.D2")
+end_time <- Sys.time()
+time_cah10 = end_time-start_time
+
+```
+
+
+
+```{r,echo=F}
+groupes.cah10 <-cutree(wind_cah10,k=4) 
+```
+
+
+### II.3.3) Kmens VS CAH
+
+- Comparaison des temps d'exécution
+
+```{r, echo=F,results='hide'}
+#temps d'exécution kmeans pour 10 composantes principales
+print(paste0("temps d'execution kmeans: ",time_kmean10))
+
+#temps d'exécution CAH pour 10 composantes principales
+print(paste0("temps d'execution CAH: ",time_cah10))
+```
+
+|              | Kmeans           | CAH         |
+|--------------|------------------|-------------|
+|données brutes|`r time_kmean_raw`|`r time_cah` |
+|--------------|------------------|-------------|
+|ACP           |`r time_kmean10`  |`r time_cah10`|
+
+
+On remarque que le temps d'exécution pour la méthode des kmeans est moins important après avoir gardé que les 10 composantes principales contrairement à la différence de temps d'exécution dans la méthode CAH. 
+
+On représente les clustering des deux algorithmes pour les données brutes et les 10 composantes principales.
+
+```{r, echo=F,idth=16, fig.height=4.5}
+Wind$clustercah10 = data.frame(groupes.cah10)$groupes.cah10
+
+par(mfrow=c(2,2))
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$cluster))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "Kmeans clustering Wind raw data")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$cluster10))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "Kmeans clustering 10 components")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clusterward))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "Hierarchical clustering Wind - ward")
+
+plot(Wind$Lon,Wind$Lat,col=as.factor(Wind$clustercah10))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(2,42.5,"Perpignan",pos=4)
+title(main = "Cah clustering with 10 components")
+```
+
+On remarque que le partionnement avec la méthode Kmeans est presque exactement le même en gardant que les 10 composantes principales, par contre, le partionnement avec la méthode CAH est différent dans les deux cas, par conséquent les villes n'appartiennent pas à chaque fois au même cluster. 
+
+
+# III) Temperature Clustering
+
+## III.1) Raw data
+
+### III.1.1) Kmeans :
+
+On utilise la méthode de _kmeans_ pour fournir une segmentation en 4 groupes du _Temp_ en utilisant la série temporelle brute. Les variables ont les mêmes unités donc on ne normalise pas. Les valeurs sont comprises entre -23.1 et 38.3
+```{r,results='hide',echo=F}
+temp = Temp[,1:8760] #les variables ont les mêmes unités donc on ne normalise pas
+min(temp) ; max(temp) # les valeurs sont comprises entre -23.1 et 38.3
+start_time <- Sys.time()
+set.seed(7)
+temp_kmeans <- kmeans(temp, centers = 4, nstart = 5) 
+end_time <- Sys.time()
+time_kmean_raw_Temp = end_time-start_time
+```
+
+```{r,echo=F}
+Temp$cluster <- as.factor(temp_kmeans$cluster) #On ajoute une colonne "cluster" dans le bloc de données Temp
+```
+
+
+### III.1.2) Clustering Hierarchique
+
+Dans cette partie, on va utiliser directement la méthode wards
+```{r,echo=F}
+start_time <- Sys.time()
+Temp_d = dist(temp,method = "euclidean")
+Temp_ward<-hclust(Temp_d, method="ward.D2")
+end_time <- Sys.time()
+time_cah_raw_Temp = end_time-start_time
+
+```
+
+```{r,echo=F}
+groupes.ward <-cutree(Temp_ward,k=4) 
+```
+
+### III.1.3) Kmeans VS CAH
+
+- Comparaison des temps d'exécution
+```{r, echo=FALSE,results='hide'}
+#temps d'exécution kmeans données brutes
+
+time_kmean_raw_Temp
+
+#temps d'exécution cah données brutes
+time_cah_raw_Temp
+```
+
+Pour l'algorithme kmeans, la différence de temps est de `r time_kmean_raw_Temp` alors que pour le clustering hiérarchique elle est de `r time_cah_raw_Temp`.
+
+
+```{r,echo=FALSE,width=16, fig.height=3.5}
+Temp$clustercah <- data.frame(groupes.ward)$groupes.ward
+par(mfrow=c(1,2))
+plot(Temp$Lon,Temp$Lat,col=as.factor(Temp$clustercah))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+title(main = "Cah - ward clustering")
+
+plot(Temp$Lon,Temp$Lat,col=as.factor(Temp$cluster))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+title(main = "Kmeans clustering")
+```
+
+On remarque que les 2 partitionnements sont presque identiques et contrairement au clustering des données Wind, certaines partitions ici ne sont pas très compactes (partie sud).
+
+## III.2) Feature extraction
+
+### ACP : 
+
+On fait une ACP pour réduire les dimensions des données. On centre les données, par contre, on n'a pas besoin de normaliser car les variables ont les mêmes unités.
+
+```{r,echo=F}
+temp_pca = prcomp(Temp[,1:8760], center = T)
+```
+
+On représente la proportion de la variance expliquée pour un certain nombre de composante.
+
+```{r,echo=F,width=16, fig.height=3.5}
+std_dev <- temp_pca$sdev
+pr_var <- std_dev^2
+#proportion de variance expliquée
+prop_varex <- pr_var/sum(pr_var)
+par(mfrow=c(1,2))
+#scree plot
+plot(prop_varex, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",xlim=c(0,20),
+          type = "b")
+
+#cumulative scree plot
+plot(cumsum(prop_varex), xlab = "Principal Component",
+              ylab = "Cumulative Proportion of Variance Explained", xlim=c(0,20),
+              type = "b")
+```
+
+Ici, on peut voir que les 10 premieres composantes expliquent plus de 90% de la variance, donc on peut choisir de conserver 10 composantes principales.
+On observe par ailleurs que à partir de 10 composantes pricipales, la variance expliquée cumulée n'augmente pas significativement.
+
+
+## III.3) Clustering using model based
+
+On étudie une segmentation de la série temporelle de température, basée sur la représentation ACP, en ne gardant seulement que 10 composantes principales utilisant la méthode de clustering basée sur un modele.
+
+```{r,echo=F}
+temp10 = temp_pca$x[,1:10] #on prend que les 10 composantes principales
+```
+
+On va regrouper les données _Temp_ en utilisant la fonction _mclust_ qui utilise BIC (Critère d'Information Bayésien) comme critère de sélection de modèle de cluster.
+Dans un premier temps, on va essayer différents modèles: modèle sphérique, volume égal: **EII**, modèle sphérique, volume variable: **VII**, modèle diagonale, volume et forme variables: **VVI**, et modèle ellipsoïdale, volume variable et forme égale: **VEV**.
+
+```{r,echo=F}
+library(mclust)
+eii <- Mclust(temp10, modelNames = "EII")
+vii <- Mclust(temp10, modelNames = "VII")
+vvi <- Mclust(temp10, modelNames = "VVI")
+vev <- Mclust(temp10, modelNames = "VEV")
+```
+
+On trace la courbe du BIC pour chaque modèle. Pour trouver le meilleur modèle et le nombre de cluster optimal il faut maximiser le BIC qui vaut ici :
+$BIC = 2\log(L)-k\log(N)$.
+avec $L$ a vraisemblance du modèle estimée, $N$ le nombre d'observations dans l'échantillon et $k$ le nombre de paramètres libres du modèle
+
+
+```{r,echo=F}
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(lattice)
+library(factoextra)
+```
+
+```{r,echo=F}
+ei = fviz_mclust(eii, "BIC", palette = "jco")
+vi = fviz_mclust(vii, "BIC", palette = "jco")
+vv = fviz_mclust(vvi, "BIC", palette = "jco")
+ve = fviz_mclust(vev, "BIC", palette = "jco")
+grid.arrange(ei, vi, vv, ve, ncol=2)
+
+```
+
+On affiche le nombre de clusters et la valeur du BIC pour chaque modèle: 
+
+```{r,echo=F}
+model = c("EII","VII","VVI","VEV")
+nbclust = (c(eii$G,vii$G,vvi$G,vev$G))
+Bic = c(eii$bic,vii$bic,vvi$bic,vev$bic)
+tab = data.frame(rbind(nbclust,Bic))
+colnames(tab)=model
+tab
+```
+
+On peut voir que la valeur la plus élevée de BIC est `r vev$bic`, donc le meilleur modèle est "VEV" avec 7 groupes.
+
+## 4) Clustering using spectral clustering
+
+On utilise la méthode de spectral clustering pour regrouper les observations de température en utilisant les 10 principales composantes de l'ACP. On trace la courbe du nombre de clusters en fonction de l'inertie intra-class qu'on divise par le nombre de cluster.
+
+```{r, echo=F,width=18, fig.height=4}
+library(kernlab)
+par(mfrow=c(2,2))
+wssplot <- function(data, nc=15, seed=1234){
+  wss <- (nrow(data)-1)*sum(apply(data,2,var))
+  for (i in 2:nc){
+    set.seed(seed)
+    wss[i] <- sum(specc(data, centers=i)@withinss)/i}
+  plot(1:nc, wss, type="b", xlab="Number of Clusters",
+       ylab="Within groups sum of squares")}
+
+wssplot(temp10,nc=10)
+```
+
+D'après la règle du coude, on remarque qu'il n'y pas d'amélioration significative à partir de 3 clusters. 
+Donc on peut considérer que le nombre de clusters optimal vaut 3.
+
+```{r,echo=F}
+temp_sp <- specc(temp10, 3)
+```
+
+## 5) Représentation des clusterings sur la carte
+
+```{r,echo=F}
+par(mfrow=c(2,2))
+Temp$clustersp = temp_sp@.Data
+plot(Temp$Lon,Temp$Lat,col=as.factor(Temp$clustersp))
+points(2,48.5,pch=20,col="red",cex=2)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="blue",cex=2)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="green",cex=2)
+text(3,42.5,"Perpignan",pos=4)
+title(main = "Spectral Clustering - Temp 10")
+
+
+Temp$clusterVEV = vev$classification
+plot(Temp$Lon,Temp$Lat,col=as.factor(Temp$clusterVEV))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(3,42.5,"Perpignan",pos=4)
+title(main = "Model based - Temp 10")
+```
+Pour mclust : on remarque que les partitions obtenues sont bien compactes, mise à part la zone à l'extrême sud, on observe deux points aberrants.
+Pour le spectral clustering : on remarque que les partitions trouvées ne sont pas du tout homogènes, ni compactes.
+
+# IV) Temperature and Wind Clustering
+
+On utilise la fonction cbind() pour fusionner les données température et les données du vent. Par ailleurs, comme _Temp_ et _Wind_ ont des unités différentes, on doit les mettre à l'échelle en les normalisant.
+
+```{r,echo=F,results='hide'}
+data = cbind(Wind[,1:8760],Temp[,1:8760])
+data = scale(data)
+data = data.frame(data, GPS)
+dim(data)
+```
+Notre nouveau jeu de données contient 259 villes et 17520 variables quantitatives et 2 colonnes en plus qui représentent la latitude et longitude de chaque ville.
+
+## IV.1) ACP
+
+On fait une ACP pour réduire la dimension de ces données.
+
+```{r,echo=F}
+prin_comp = prcomp(data[,1:17520]) 
+```
+
+
+```{r,echo=F,width=16, fig.height=2.5}
+std_dev <- prin_comp$sdev
+pr_var <- std_dev^2
+#proportion de variance expliquée
+prop_varex <- pr_var/sum(pr_var)
+
+par(mfrow=c(1,2))
+#scree plot
+plot(prop_varex, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",xlim=c(0,30),
+             type = "b")
+#cumulative scree plot
+plot(cumsum(prop_varex), xlab = "Principal Component",
+              ylab = "Cumulative Proportion of Variance Explained", xlim=c(0,30),
+              type = "b")
+
+```
+
+Ici, on peut voir que les 10 premieres composantes expliquent environ 80% de la variance, et à partir de 10 composantes pricipales, la variance expliquée cumulée n'augmente pas significativement. Donc on peut choisir de conserver 10 composantes principales.
+
+## IV.2) Kmeans
+
+On utilise l'algorithme des kmeans comme précédemment.
+
+```{r,echo=F,width=14, fig.height=2}
+data_wt=prin_comp$x[,1:10]
+g = fviz_nbclust(data_wt, kmeans, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method")
+grid.arrange(g, ncol=2)
+```
+
+Avec la méthode du coude, on choisit k=4 car l’adjonction d’un groupe supplémentaire n’augmente pas «significativement» la part d’inertie expliquée par la partition.
+
+```{r,echo=F}
+data_kmeans <- kmeans(data_wt, centers = 4, nstart = 5)
+```
+
+```{r,echo=F}
+set.seed(7)
+start_time <- Sys.time()
+data_kmeans <- kmeans(data_wt, centers = 4, nstart = 5)
+end_time <- Sys.time()
+time_kmean_wt = end_time-start_time
+```
+ 
+
+```{r,echo=F}
+data$cluster <- as.factor(data_kmeans$cluster) 
+```
+
+## IV.3) Model based 
+
+On regroupe les données en utilisant la fonction _mclust_.
+
+```{r,echo=F}
+start=Sys.time()
+data_em = Mclust(data_wt)
+end=Sys.time()
+time.mclust_wt=end - start
+```
+
+
+
+```{r,echo=F,results='hide'}
+data_em$G # nbr groupes
+data_em$modelName # model
+```
+
+Pour ces données, la mise en cluster basée sur un modèle a sélectionné un modèle avec `r data_em$G ` composantes.
+Le meilleur modèle choisi est le "VEV", modèle ellipsoïdale, volume variable et forme égale.
+
+
+## IV.4) Classification hiérarchique
+
+Enfin, on fait un classification hiérarchique pour regrouper nos données.
+
+```{r,echo=F}
+start=Sys.time()
+data_d = dist(data_wt,method = "euclidean")
+data_ward<-hclust(data_d, method="ward.D2")
+end=Sys.time()
+time_cah_WT= end - start
+```
+
+
+```{r, echo=F,width=14, fig.height=2}
+f = fviz_nbclust(data_wt, hcut, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method")
+grid.arrange(f, ncol=2)
+```
+
+Avec la méthode du coude, on choisit k=4 car l’adjonction d’un groupe supplémentaire n’augmente pas «significativement» la part d’inertie expliquée par la partition.
+
+## IV.5) Comparaison des 3 algorithmes
+
+- On représente la segmentation du territoire français selon les trois algorithmes utilisés.
+
+```{r,echo=F,fig.height=3}
+par(mfrow=c(1,3))
+#kmeans
+plot(data$Lon,data$Lat,col=as.factor(data$cluster))
+points(2,48.5,pch=20,col="red",cex=2)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="blue",cex=2)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="green",cex=2)
+text(3,42.5,"Perpignan",pos=4)
+title(main = "Kmeans - Wind + Temp data")
+data$clustercah <- data.frame(groupes.ward)$groupes.ward
+
+#CAH
+plot(data$Lon,data$Lat,col=as.factor(data$clustercah))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+title(main = "Cah - Wind + Temp data")
+
+#mclust
+data$clusterem = data_em$classification
+plot(Temp$Lon,Temp$Lat,col=as.factor(data$clusterem))
+points(2,48.5,pch=20,col="purple",cex=1)
+text(2,48.5,"Paris",pos=4)
+points(5,45.5 ,pch=20,col="purple",cex=1)
+text(5,45.5,"Lyon",pos=4)
+points(3,42.5,pch=20,col="purple",cex=1)
+text(3,42.5,"Perpignan",pos=4)
+title(main = "mclust - Wind + Temp data")
+
+```
+
+- Temps d'exécution des 3 algorithmes
+
+
+```{r,echo=F}
+start=Sys.time()
+data_em = Mclust(data_wt,modelNames = "VEV")
+end=Sys.time()
+time.mclust_wt=end - start
+```
+
+
+```{r,echo=F}
+print(paste0("temps kmeans : ",time_kmean_wt))
+print(paste0("temps CAH : ",time_cah_WT))
+print(paste0("temps mclust : ",time.mclust_wt))
+```
+
+On remarque que l'algorithme "Mclust" met plus de temps d'exécution que les autres. On observe que les villes n'appartiennent pas au même cluster (mis à part Lyon et Perpignan dans le mclust) ce qui signifie qu'elle n'ont pas le même profil météorologique. on observe aussi que les clusters sont globalement compacts pour les 3 algorithmes et que les Kmeans et le CAH se rapproche de la répartion des 5 climats de la France comme présenté ci-dessous.
+
+\includegraphics[width=6cm]{cartefrance.jpg}
+
+On remarque que le clustering CAH c'est qui ressemble plus à la carte du climat de France.
+
+# Conclusion : 
+
+Selon les algorithmes utilisés, on obtient des segmentations différentes. Chaque cluster représente un profil météorologique particulier et ce genre de segmentation peut être utile pour par exemple prévoir un projet de production d'énergie. 
